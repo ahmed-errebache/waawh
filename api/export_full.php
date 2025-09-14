@@ -3,7 +3,7 @@
 // Example: api/export_full.php?session_id=123
 session_start();
 require_once __DIR__ . '/../config.php';
-require_login('host');
+require_login();
 
 // Helpers to escape parentheses in PDF text
 function pdf_escape($text) {
@@ -78,9 +78,8 @@ function generate_responses_csv($sessionId, $db, $outPath) {
         $qMap[$q['id']] = $q;
     }
     // Fetch responses
-    $stmtR = $db->prepare('SELECT r.question_id, r.answer_indices, r.answer_text, r.answer_long, r.answer_rating, r.answer_date, r.answer_feedback, r.is_correct, r.created_at, p.name as participant_name
+    $stmtR = $db->prepare('SELECT r.question_id, r.answer_indices, r.is_correct, r.created_at, r.user_name as participant_name
         FROM responses r
-        JOIN participants p ON r.participant_id = p.id
         WHERE r.session_id = ? ORDER BY r.created_at');
     $stmtR->execute([$sessionId]);
     while ($row = $stmtR->fetch(PDO::FETCH_ASSOC)) {
@@ -89,32 +88,33 @@ function generate_responses_csv($sessionId, $db, $outPath) {
         $type = $qMap[$qid]['qtype'] ?? '';
         $answerStr = '';
         // Determine answer string depending on type
-        switch ($type) {
-            case 'quiz':
-            case 'truefalse':
-            case 'opinion':
-                $indices = $row['answer_indices'] ? json_decode($row['answer_indices'], true) : [];
-                if (is_array($indices)) {
-                    $answerStr = implode('|', $indices);
-                }
-                break;
-            case 'short':
-                $answerStr = $row['answer_text'] ?? '';
-                break;
-            case 'long':
-                $answerStr = $row['answer_long'] ?? '';
-                break;
-            case 'rating':
-                $answerStr = $row['answer_rating'] ?? '';
-                break;
-            case 'date':
-                $answerStr = $row['answer_date'] ?? '';
-                break;
-            case 'feedback':
-                $answerStr = $row['answer_feedback'] ?? '';
-                break;
-            default:
-                break;
+        // All answer data is stored in answer_indices as JSON
+        if ($row['answer_indices'] !== null && $row['answer_indices'] !== '') {
+            $decoded = json_decode($row['answer_indices'], true);
+            switch ($type) {
+                case 'quiz':
+                case 'truefalse':
+                case 'opinion':
+                    if (is_array($decoded)) {
+                        $answerStr = implode('|', $decoded);
+                    }
+                    break;
+                case 'short':
+                case 'long':
+                case 'date':
+                case 'feedback':
+                case 'rating':
+                    // For these types, the answer is stored directly as a value
+                    if (!is_array($decoded) && $decoded !== null) {
+                        $answerStr = (string)$decoded;
+                    } elseif (is_array($decoded) && count($decoded) > 0) {
+                        $answerStr = (string)$decoded[0];
+                    }
+                    break;
+                default:
+                    $answerStr = $row['answer_indices'];
+                    break;
+            }
         }
         fputcsv($fh, [$qid, $qtext, $row['participant_name'], $answerStr, $row['created_at']]);
     }
@@ -136,6 +136,13 @@ $session = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$session) {
     http_response_code(404);
     echo 'Session introuvable';
+    exit;
+}
+$user = current_user();
+// Only allow export if current user is admin or the host of this session
+if ($user['role'] !== 'admin' && $session['host_id'] != $user['id']) {
+    http_response_code(403);
+    echo 'Accès refusé.';
     exit;
 }
 // Only allow export if session is ended (is_active=0)
@@ -214,10 +221,25 @@ foreach ($questions as $idx => $q) {
         // Count of responses for open questions
         $lines[] = '  Réponses: ' . $total;
     } elseif ($qtype === 'rating') {
-        // Compute average rating
-        $stmtAvg = $db->prepare('SELECT AVG(answer_rating) FROM responses WHERE session_id=? AND question_id=?');
+        // Compute average rating from answer_indices
+        $stmtAvg = $db->prepare('SELECT answer_indices FROM responses WHERE session_id=? AND question_id=?');
         $stmtAvg->execute([$session_id, $q['id']]);
-        $avg = $stmtAvg->fetchColumn();
+        $ratings = [];
+        while ($ratingRow = $stmtAvg->fetch(PDO::FETCH_ASSOC)) {
+            if ($ratingRow['answer_indices'] !== null) {
+                $decoded = json_decode($ratingRow['answer_indices'], true);
+                $rating = null;
+                if (!is_array($decoded) && is_numeric($decoded)) {
+                    $rating = floatval($decoded);
+                } elseif (is_array($decoded) && count($decoded) > 0 && is_numeric($decoded[0])) {
+                    $rating = floatval($decoded[0]);
+                }
+                if ($rating !== null) {
+                    $ratings[] = $rating;
+                }
+            }
+        }
+        $avg = count($ratings) > 0 ? array_sum($ratings) / count($ratings) : null;
         $lines[] = '  Note moyenne: ' . ($avg !== null ? round($avg, 2) : 'N/A');
     }
     $lines[] = '';
