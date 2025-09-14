@@ -1,41 +1,29 @@
 <?php
-require_once '../config.php';
-require_once '../db.php';
+session_start();
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../db.php'; // assure la même connexion que le reste
+if (function_exists('require_login')) {
+    require_login('host');
+}
 
-header('Content-Type: application/json');
-
-// Vérifier l'authentification
-if (!isHostLoggedIn()) {
-    http_response_code(401);
-    echo json_encode(['ok' => false, 'error' => 'Non autorisé']);
+/**
+ * Récupère l'ID de la session :
+ * - d'abord via GET/POST (input hidden),
+ * - sinon via la session serveur (si tu as choisi l'option sans passer l'ID dans le bouton).
+ */
+$session_id = (int)($_REQUEST['session_id'] ?? ($_SESSION['current_session_id'] ?? 0));
+if ($session_id <= 0) {
+    http_response_code(400);
+    echo 'session_id manquant';
     exit;
 }
 
-try {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $sessionId = $input['session_id'] ?? null;
-    
-    if (!$sessionId) {
-        throw new Exception('ID de session manquant');
-    }
-    
-    $db = Database::getInstance()->getPDO();
-    
-    // Terminer la session
-    $stmt = $db->prepare("UPDATE sessions SET status = 'ended', current_question_index = -1 WHERE id = ?");
-    $stmt->execute([$sessionId]);
-    
-    if ($stmt->rowCount() === 0) {
-        throw new Exception('Session introuvable');
-    }
-    
-    echo json_encode(['ok' => true]);
-    
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode([
-        'ok' => false,
-        'error' => $e->getMessage()
-    ]);
-}
-?>
+$db = getDatabase();
+
+/* Clôture la session (pas d’export auto) */
+$stmt = $db->prepare('UPDATE sessions SET is_active = 0, ended_at = CURRENT_TIMESTAMP WHERE id = ?');
+$stmt->execute([$session_id]);
+
+/* Retour sur l’écran animateur de la session (où tu as les boutons d’export) */
+header('Location: ../host_session.php?session_id=' . $session_id);
+exit;

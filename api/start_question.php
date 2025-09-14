@@ -1,46 +1,39 @@
 <?php
-require_once '../config.php';
-require_once '../db.php';
+// API endpoint to start the quiz session (reset question index and reveal state)
+session_start();
+require_once __DIR__ . '/../config.php';
+require_login('host');
 
-header('Content-Type: application/json');
-
-// Vérifier l'authentification
-if (!isHostLoggedIn()) {
-    http_response_code(401);
-    echo json_encode(['ok' => false, 'error' => 'Non autorisé']);
+// Only allow POST requests
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
     exit;
 }
 
-try {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $sessionId = $input['session_id'] ?? null;
-    
-    if (!$sessionId) {
-        throw new Exception('ID de session manquant');
-    }
-    
-    $db = Database::getInstance()->getPDO();
-    
-    // Vérifier que la session existe et est ouverte
-    $stmt = $db->prepare("SELECT * FROM sessions WHERE id = ? AND status = 'open'");
-    $stmt->execute([$sessionId]);
-    $session = $stmt->fetch();
-    
-    if (!$session) {
-        throw new Exception('Session introuvable ou fermée');
-    }
-    
-    // Démarrer à la première question
-    $stmt = $db->prepare("UPDATE sessions SET current_question_index = 0 WHERE id = ?");
-    $stmt->execute([$sessionId]);
-    
-    echo json_encode(['ok' => true]);
-    
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode([
-        'ok' => false,
-        'error' => $e->getMessage()
-    ]);
+check_csrf();
+
+$session_id = $_POST['session_id'] ?? null;
+if (!$session_id) {
+    http_response_code(400);
+    exit;
 }
-?>
+
+$user = current_user();
+$db = connect_db();
+
+// Verify that the session belongs to the host and is active
+$stmt = $db->prepare('SELECT * FROM sessions WHERE id = ? AND host_id = ? AND is_active = 1');
+$stmt->execute([$session_id, $user['id']]);
+$session = $stmt->fetch(PDO::FETCH_ASSOC);
+if (!$session) {
+    http_response_code(403);
+    exit;
+}
+
+// Reset the current question index to 0 and reveal state to 0, and record the start time
+$db->prepare('UPDATE sessions SET current_question_index = 0, reveal_state = 0, started_at = CURRENT_TIMESTAMP WHERE id = ?')
+    ->execute([$session_id]);
+
+// Redirect back to host session control page
+header('Location: ../host_session.php?session_id=' . $session_id);
+exit;

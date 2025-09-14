@@ -1,158 +1,57 @@
-# Mission Cycle - Quiz Éducatif
+# Application WAAWH – Sondages en direct
 
-Application web interactive de quiz éducatif sur le thème du cycle menstruel, développée en PHP avec SQLite.
+Cette application est une implémentation complète d'un système de sondages/quiz en direct écrite en PHP 8 natif avec HTML, CSS (Bootstrap 5) et JavaScript minimal. Elle est prête à être déployée sur un hébergement mutualisé comme Hostinger : il suffit de transférer les fichiers via FTP et de s'assurer que PHP 8 et les droits d'écriture sur les dossiers `uploads` et `data` sont disponibles.
 
-## 🎯 Fonctionnalités
+## Fonctionnalités
 
-- **Interface animatrice** : Création et gestion de sessions de quiz en temps réel
-- **Interface participants** : Participation au quiz avec feedback immédiat
-- **Visualisation en direct** : Graphiques des réponses en temps réel avec Chart.js
-- **Base de données SQLite** : Stockage des sessions, questions et réponses
-- **20 questions éducatives** : Contenu pédagogique sur le cycle menstruel
-- **Système de feedback** : Confirmations courtes et explications détaillées
+- **Gestion multi‐utilisateurs** : un administrateur peut créer des comptes d'animateurs (clients) et leur attribuer des sondages. Les animateurs disposent d'un profil avec logo et palette de couleurs.
+- **Création et édition de sondages** : l'administrateur crée et modifie des sondages, ajoute des questions de différents types (choix multiples, vrai/faux, réponses courtes, réponses longues, notation, date) avec supports texte et médias (images, vidéos, audio, PDF). Les questions peuvent être chronométrées et notées.
+- **Sessions en direct** : un animateur démarre une session sur un sondage qui lui est assigné. Les participants rejoignent via un code PIN à six chiffres et répondent en temps réel. L'animateur contrôle le déroulement (démarrage, révélation des réponses, passage à la question suivante, fin) et voit un classement actualisé.
+- **Classement** : calcul du score des participants en fonction des réponses et affichage du top 3 ainsi que de la liste complète des joueurs.
+- **Thèmes personnalisables** : chaque animateur peut définir des couleurs et un logo qui personnaliseront son espace et les pages participants.
+- **Support SQLite/MySQL** : par défaut la base de données est un fichier SQLite. Il est possible de passer facilement à MySQL en modifiant les constantes dans `config.php`.
+- **Sécurité simple** : gestion de sessions HTTP‐only, jetons CSRF, validation des entrées, contrôle des types MIME et des tailles de fichiers (50 Mo max) lors des uploads.
 
-## 🛠️ Prérequis
+## Installation
 
-- **PHP 8.0+** avec extensions PDO et SQLite
-- **Serveur web** (Apache, Nginx, ou serveur de développement PHP)
-- **Navigateur moderne** supportant JavaScript ES6+
+1. **Prérequis** : un hébergement supportant PHP 8.0 ou plus avec l'extension PDO (SQLite et/ou MySQL).
+2. **Déploiement** : transférez l'ensemble du dossier `waawh_app` sur votre serveur (par exemple dans `public_html`). Assurez‐vous que les dossiers `waawh_app/data` et `waawh_app/uploads` disposent des droits d'écriture (chmod 755 ou 775 selon l'hébergeur).
+3. **Configuration** : ouvrez `config.php` pour ajuster les éléments suivants :
+   - `USE_SQLITE` : laissez `true` pour utiliser SQLite (par défaut) ou mettez `false` pour MySQL.
+   - `MYSQL_DSN`, `MYSQL_USER`, `MYSQL_PASS` : renseignez vos paramètres MySQL si nécessaire.
+   - `DEV_ADMIN_USERNAME` et `DEV_ADMIN_PASSWORD` : modifiez le compte administrateur par défaut en production et pensez à le hasher avec `password_hash()`.
+4. **Accès** :
+   - Page d'accueil : `/index.php`.
+   - Connexion administrateur ou animateur : `/host_login.php`.
+5. **Comptes de démonstration** :
+   - Administrateur : `admin` / `admin`.
+   - Un animateur de démonstration a été créé (`nadia` / `nadia`) avec l'entreprise *WAAWH*.
 
-## 📦 Installation
+## Notes de sécurité
 
-1. **Télécharger et décompresser** le projet dans votre dossier web
-2. **Configurer les permissions** (optionnel) :
-   ```bash
-   chmod 755 .
-   chmod 666 database.sqlite  # Si le fichier existe déjà
-   ```
-3. **Ouvrir dans le navigateur** : `http://localhost/mission-cycle/index.php`
+- Les mots de passe en clair dans la base de données sont destinés au développement. Passez en production en hachant les mots de passe avec `password_hash()` et en mettant à jour les entrées correspondantes.
+- Les uploads sont contrôlés par type MIME et taille maximale mais il est recommandé d'utiliser un répertoire non accessible au public ou d'ajouter des protections supplémentaires selon votre hébergement.
 
-La base de données SQLite sera créée automatiquement au premier lancement avec les 20 questions pré-intégrées.
+## Structure du projet
 
-## 🔐 Identifiants Animatrice
+- `index.php` : page d’accueil publique.
+- `host_login.php` : connexion (admin et animateurs).
+- `admin.php` : tableau de bord administrateur (gestion des sondages et animateurs).
+- `host_manage.php`, `host_edit.php` : gestion des comptes animateurs.
+- `builder.php` : création/édition de sondages.
+- `edit_question.php` : création/édition de questions avec prise en charge des médias.
+- `host_dashboard.php` : tableau de bord animateur (lancement des sessions et suivi).
+- `host_session.php` : contrôle d’une session en direct avec rafraîchissement du classement.
+- `join.php` : interface participant (connexion via PIN, réponses aux questions, affichage des corrections et explications).
+- `preview.php` : aperçu en lecture seule d’un sondage.
+- Dossier `api/` : scripts d’API pour gérer les sessions et actions AJAX.
+- Dossier `uploads/` : stockage des fichiers envoyés (images, vidéos, audio, PDF).
 
-- **Nom d'utilisateur** : `Nadia`
-- **Mot de passe** : `P@ssw0rd123!`
+## Personnalisation
 
-## 🚀 Utilisation
+- Les couleurs par défaut sont inspirées du logo WAAWH (#FFBF69 pour la couleur primaire, #2EC4B6 pour l’accent, #FFF9F2 pour l’arrière‐plan). Chaque animateur peut définir sa propre palette via son profil.
+- Pour changer le logo global, remplacez `assets/logo.png` par votre propre fichier PNG.
 
-### Pour l'animatrice :
+## Remerciements
 
-1. **Connexion** : Cliquer sur "Espace animatrice" depuis l'accueil
-2. **Créer une session** : Générer un PIN à 5 chiffres
-3. **Partager le PIN** : Communiquer le PIN aux participants
-4. **Démarrer le quiz** : Lancer la première question
-5. **Gérer les questions** : Passer aux questions suivantes ou terminer
-
-### Pour les participants :
-
-1. **Rejoindre** : Entrer prénom + PIN sur la page d'accueil
-2. **Attendre** : Patienter jusqu'au démarrage par l'animatrice
-3. **Répondre** : Sélectionner les réponses aux questions
-4. **Feedback** : Recevoir confirmation ou explication détaillée
-
-## 📊 Fonctionnalités Techniques
-
-### API Endpoints
-
-- `POST /api/create_session.php` - Créer une nouvelle session
-- `POST /api/get_session.php` - Récupérer l'état d'une session
-- `POST /api/start_question.php` - Démarrer le quiz
-- `POST /api/next_question.php` - Passer à la question suivante
-- `POST /api/end_session.php` - Terminer une session
-- `POST /api/submit_answer.php` - Soumettre une réponse
-
-### Base de Données
-
-- **sessions** : Gestion des sessions de quiz
-- **questions** : 20 questions pré-intégrées
-- **responses** : Réponses des participants
-
-### Technologies Utilisées
-
-- **Backend** : PHP 8+ avec PDO SQLite
-- **Frontend** : HTML5, Bootstrap 5, JavaScript vanilla
-- **Graphiques** : Chart.js v4
-- **Base de données** : SQLite
-
-## 🎨 Personnalisation
-
-### Modifier les questions
-
-Éditer le fichier `db.php`, fonction `seedQuestions()` :
-
-```php
-$questions = [
-    [
-        'qtext' => 'Votre question ici',
-        'qtype' => 'quiz', // ou 'truefalse'
-        'choices' => ['Choix A', 'Choix B', 'Choix C', 'Choix D'],
-        'correct_indices' => [0], // Index de la/des bonne(s) réponse(s)
-        'confirm_text' => 'Confirmation courte',
-        'explain_text' => 'Explication détaillée',
-        'explain_media' => ['image' => '', 'video' => ''],
-        'seconds' => 30,
-        'points' => 1
-    ],
-    // ... autres questions
-];
-```
-
-### Modifier les identifiants
-
-Éditer le fichier `config.php` :
-
-```php
-define('HOST_USERNAME', 'VotreNom');
-define('HOST_PASSWORD', 'VotreMotDePasse');
-```
-
-## 🔧 Structure des Fichiers
-
-```
-mission-cycle/
-├── index.php              # Page d'accueil
-├── host_login.php          # Connexion animatrice
-├── host_dashboard.php      # Dashboard animatrice
-├── join.php               # Interface participant
-├── config.php             # Configuration
-├── db.php                 # Gestion base de données
-├── database.sqlite        # Base SQLite (auto-créée)
-├── api/                   # Endpoints API
-│   ├── create_session.php
-│   ├── get_session.php
-│   ├── start_question.php
-│   ├── next_question.php
-│   ├── end_session.php
-│   └── submit_answer.php
-└── README.md              # Documentation
-```
-
-## 🐛 Dépannage
-
-### Erreurs courantes
-
-- **"Base de données introuvable"** : Vérifier les permissions d'écriture
-- **"Session introuvable"** : Le PIN a peut-être expiré ou la session est fermée
-- **Graphiques non affichés** : Vérifier la connexion internet (Chart.js CDN)
-
-### Logs
-
-Les erreurs PHP sont affichées selon la configuration du serveur. Pour le développement :
-
-```php
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
-```
-
-## 📝 Licence
-
-Projet éducatif - Usage libre pour fins pédagogiques.
-
-## 👥 Support
-
-Pour toute question ou suggestion d'amélioration, n'hésitez pas à nous contacter.
-
----
-
-**Mission Cycle** - Démystifier le cycle menstruel par l'éducation interactive 💛
+Ce projet a été généré automatiquement par un assistant IA selon un cahier des charges détaillé. Il vise à fournir une base solide mais peut nécessiter des ajustements pour un usage en production (performances, sécurité renforcée, ergonomie). N’hésitez pas à l’améliorer !

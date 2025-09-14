@@ -1,66 +1,51 @@
 <?php
-require_once '../config.php';
-require_once '../db.php';
+// API endpoint to advance to the next question in the session
+session_start();
+require_once __DIR__ . '/../config.php';
+require_login('host');
 
-header('Content-Type: application/json');
-
-// Vérifier l'authentification
-if (!isHostLoggedIn()) {
-    http_response_code(401);
-    echo json_encode(['ok' => false, 'error' => 'Non autorisé']);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
     exit;
 }
 
-try {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $sessionId = $input['session_id'] ?? null;
-    
-    if (!$sessionId) {
-        throw new Exception('ID de session manquant');
-    }
-    
-    $db = Database::getInstance()->getPDO();
-    
-    // Récupérer la session
-    $stmt = $db->prepare("SELECT * FROM sessions WHERE id = ? AND status = 'open'");
-    $stmt->execute([$sessionId]);
-    $session = $stmt->fetch();
-    
-    if (!$session) {
-        throw new Exception('Session introuvable ou fermée');
-    }
-    
-    // Compter le nombre total de questions
-    $stmt = $db->query("SELECT COUNT(*) FROM questions");
-    $totalQuestions = $stmt->fetchColumn();
-    
-    $nextIndex = $session['current_question_index'] + 1;
-    
-    if ($nextIndex >= $totalQuestions) {
-        // Fin du quiz
-        $stmt = $db->prepare("UPDATE sessions SET status = 'ended', current_question_index = -1 WHERE id = ?");
-        $stmt->execute([$sessionId]);
-        
-        $session['status'] = 'ended';
-        $session['current_question_index'] = -1;
-    } else {
-        // Passer à la question suivante
-        $stmt = $db->prepare("UPDATE sessions SET current_question_index = ? WHERE id = ?");
-        $stmt->execute([$nextIndex, $sessionId]);
-        
-        $session['current_question_index'] = $nextIndex;
-    }
-    
-    echo json_encode([
-        'ok' => true,
-        'session' => $session
-    ]);
-    
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode([
-        'ok' => false,
-        'error' => $e->getMessage()
-    ]);
+check_csrf();
+
+$session_id = $_POST['session_id'] ?? null;
+if (!$session_id) {
+    http_response_code(400);
+    exit;
 }
-?>
+
+$user = current_user();
+$db = connect_db();
+
+// Verify the session belongs to this host and is active
+$stmt = $db->prepare('SELECT * FROM sessions WHERE id = ? AND host_id = ? AND is_active = 1');
+$stmt->execute([$session_id, $user['id']]);
+$session = $stmt->fetch(PDO::FETCH_ASSOC);
+if (!$session) {
+    http_response_code(403);
+    exit;
+}
+
+// Count the total number of questions in the survey
+$stmt2 = $db->prepare('SELECT COUNT(*) FROM questions WHERE survey_id = ?');
+$stmt2->execute([$session['survey_id']]);
+$total = (int)$stmt2->fetchColumn();
+
+// Compute next index; if beyond total, keep at last index
+// Calculate next index (0-based) and ensure it does not exceed last question index
+$nextIndex = $session['current_question_index'] + 1;
+// $total is the number of questions; valid indices are 0..$total-1
+if ($nextIndex >= $total) {
+    // Stay on the last question instead of incrementing beyond
+    $nextIndex = max(0, $total - 1);
+}
+
+// Update current_question_index and reset reveal_state to 0
+$db->prepare('UPDATE sessions SET current_question_index = ?, reveal_state = 0 WHERE id = ?')
+    ->execute([$nextIndex, $session_id]);
+
+header('Location: ../host_session.php?session_id=' . $session_id);
+exit;
