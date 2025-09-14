@@ -9,21 +9,21 @@ function getDatabase() {
     
     if ($pdo === null) {
         try {
-            if (DB_TYPE === 'sqlite') {
+            if (USE_SQLITE) {
                 // Crée le dossier data si nécessaire
-                $dataDir = dirname(DB_PATH);
+                $dataDir = dirname(SQLITE_FILE);
                 if (!is_dir($dataDir)) {
                     mkdir($dataDir, 0755, true);
                 }
                 
-                $dsn = 'sqlite:' . DB_PATH;
+                $dsn = 'sqlite:' . SQLITE_FILE;
                 $pdo = new PDO($dsn);
                 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
                 $pdo->exec('PRAGMA foreign_keys = ON');
             } else {
                 // MySQL
-                $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
-                $pdo = new PDO($dsn, DB_USER, DB_PASS);
+                $dsn = MYSQL_DSN;
+                $pdo = new PDO($dsn, MYSQL_USER, MYSQL_PASS);
                 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             }
             
