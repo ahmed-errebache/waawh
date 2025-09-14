@@ -26,6 +26,38 @@ define('MYSQL_PASS', '');
 // Location of the SQLite database file relative to this file.
 define('SQLITE_FILE', __DIR__ . '/data/database.sqlite');
 
+// -----------------------------------------------------------------------------
+// Constants for compatibility with db.php
+//
+// The db.php module expects different constant names. We define them here
+// based on the existing configuration to maintain compatibility.
+
+// Type of database: 'sqlite' or 'mysql'
+if (!defined('DB_TYPE')) {
+    define('DB_TYPE', USE_SQLITE ? 'sqlite' : 'mysql');
+}
+
+if (USE_SQLITE) {
+    // Path to SQLite database file for db.php compatibility
+    if (!defined('DB_PATH')) {
+        define('DB_PATH', SQLITE_FILE);
+    }
+} else {
+    // MySQL connection parameters for db.php compatibility
+    if (!defined('DB_HOST')) {
+        define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
+    }
+    if (!defined('DB_NAME')) {
+        define('DB_NAME', getenv('DB_NAME') ?: 'waawh');
+    }
+    if (!defined('DB_USER')) {
+        define('DB_USER', MYSQL_USER);
+    }
+    if (!defined('DB_PASS')) {
+        define('DB_PASS', MYSQL_PASS);
+    }
+}
+
 // Ensure the data and uploads directories exist with write permissions.
 $directories = [__DIR__ . '/data', __DIR__ . '/uploads'];
 foreach ($directories as $dir) {
