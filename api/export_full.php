@@ -1,194 +1,250 @@
 <?php
-// Exporte un ZIP: PDF des statistiques + CSV des réponses (+ copie persistante dans /exports)
+// Export a session's results as a ZIP containing a PDF of statistics and a CSV of responses
+// Example: api/export_full.php?session_id=123
 session_start();
 require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../db.php'; // même connexion DB
+require_login('host');
 
-if (function_exists('require_login')) {
-    require_login('host');
+// Helpers to escape parentheses in PDF text
+function pdf_escape($text) {
+    // Escape parentheses and backslashes as required by PDF syntax
+    return str_replace(["\\", "(", ")"], ["\\\\", "\\(", "\\)"], $text);
 }
 
-$session_id = (int)($_REQUEST['session_id'] ?? 0);
-if ($session_id <= 0) {
+// Generate a simple PDF file with statistics lines
+function generate_stats_pdf($lines, $outPath) {
+    // Build PDF objects manually. This minimal implementation writes a single-page PDF
+    // using the built-in Helvetica font. Each line will be rendered on its own line.
+    $content = "";
+    // Start text object
+    $content .= "BT\n";
+    // Use Helvetica 12pt
+    $content .= "/F1 12 Tf\n";
+    // Move to starting position (50, 780)
+    $content .= "50 780 Td\n";
+    foreach ($lines as $i => $line) {
+        $escaped = pdf_escape($line);
+        // Output text for this line
+        $content .= "(" . $escaped . ") Tj\n";
+        // Move down by 15 points for next line
+        $content .= "0 -15 Td\n";
+    }
+    $content .= "ET\n";
+    $length = strlen($content);
+    // Offsets for objects (to compute xref)
+    $objs = [];
+    $pdf  = "%PDF-1.4\n";
+    // Catalog
+    $objs[] = strlen($pdf);
+    $pdf .= "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+    // Pages
+    $objs[] = strlen($pdf);
+    $pdf .= "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+    // Page
+    $objs[] = strlen($pdf);
+    $pdf .= "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\n>>\nendobj\n";
+    // Contents
+    $objs[] = strlen($pdf);
+    $pdf .= "4 0 obj\n<< /Length $length >>\nstream\n" . $content . "endstream\nendobj\n";
+    // Font object for Helvetica
+    $objs[] = strlen($pdf);
+    $pdf .= "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+    // xref table
+    $xrefOffset = strlen($pdf);
+    $pdf .= "xref\n0 " . (count($objs) + 1) . "\n0000000000 65535 f \n";
+    foreach ($objs as $offset) {
+        $pdf .= sprintf("%010d 00000 n \n", $offset);
+    }
+    // trailer
+    $pdf .= "trailer\n<< /Size " . (count($objs) + 1) . " /Root 1 0 R >>\nstartxref\n" . $xrefOffset . "\n%%EOF";
+    file_put_contents($outPath, $pdf);
+}
+
+function generate_responses_csv($sessionId, $db, $outPath) {
+    // Output CSV with headers: question_id, question_text, participant_name, answer, timestamp
+    $fh = fopen($outPath, 'w');
+    fputcsv($fh, ['question_id','question_text','participant_name','answer','created_at']);
+    // Fetch all questions for ordering
+    $stmtQ = $db->prepare('SELECT id, qtext, qtype FROM questions WHERE survey_id = ? ORDER BY id ASC');
+    // Determine survey id from session
+    $stmt = $db->prepare('SELECT survey_id FROM sessions WHERE id = ?');
+    $stmt->execute([$sessionId]);
+    $surveyId = $stmt->fetchColumn();
+    $stmtQ->execute([$surveyId]);
+    $questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
+    // Preload questions mapping
+    $qMap = [];
+    foreach ($questions as $q) {
+        $qMap[$q['id']] = $q;
+    }
+    // Fetch responses
+    $stmtR = $db->prepare('SELECT r.question_id, r.answer_indices, r.answer_text, r.answer_long, r.answer_rating, r.answer_date, r.answer_feedback, r.is_correct, r.created_at, p.name as participant_name
+        FROM responses r
+        JOIN participants p ON r.participant_id = p.id
+        WHERE r.session_id = ? ORDER BY r.created_at');
+    $stmtR->execute([$sessionId]);
+    while ($row = $stmtR->fetch(PDO::FETCH_ASSOC)) {
+        $qid = $row['question_id'];
+        $qtext = $qMap[$qid]['qtext'] ?? '';
+        $type = $qMap[$qid]['qtype'] ?? '';
+        $answerStr = '';
+        // Determine answer string depending on type
+        switch ($type) {
+            case 'quiz':
+            case 'truefalse':
+            case 'opinion':
+                $indices = $row['answer_indices'] ? json_decode($row['answer_indices'], true) : [];
+                if (is_array($indices)) {
+                    $answerStr = implode('|', $indices);
+                }
+                break;
+            case 'short':
+                $answerStr = $row['answer_text'] ?? '';
+                break;
+            case 'long':
+                $answerStr = $row['answer_long'] ?? '';
+                break;
+            case 'rating':
+                $answerStr = $row['answer_rating'] ?? '';
+                break;
+            case 'date':
+                $answerStr = $row['answer_date'] ?? '';
+                break;
+            case 'feedback':
+                $answerStr = $row['answer_feedback'] ?? '';
+                break;
+            default:
+                break;
+        }
+        fputcsv($fh, [$qid, $qtext, $row['participant_name'], $answerStr, $row['created_at']]);
+    }
+    fclose($fh);
+}
+
+// Validate session ID
+$session_id = $_GET['session_id'] ?? null;
+if (!$session_id) {
     http_response_code(400);
-    echo 'session_id manquant';
+    echo 'Paramètre session_id manquant.';
     exit;
 }
-
-$db = get_db();
-
-/* --- Récup session --- */
-$st = $db->prepare("SELECT s.*, v.title AS survey_title
-                    FROM sessions s
-                    LEFT JOIN surveys v ON v.id = s.survey_id
-                    WHERE s.id = ?");
-$st->execute([$session_id]);
-$session = $st->fetch(PDO::FETCH_ASSOC);
+$db = connect_db();
+// Verify session exists and belongs to host
+$stmt = $db->prepare('SELECT * FROM sessions WHERE id = ?');
+$stmt->execute([$session_id]);
+$session = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$session) {
     http_response_code(404);
-    echo "Session introuvable";
+    echo 'Session introuvable';
     exit;
 }
-
-/* -------------------- Helpers PDF (ultra-minimal) -------------------- */
-function pdf_escape($t){ return str_replace(['\\','(',')'], ['\\\\','\\(','\\)'], (string)$t); }
-function make_minimal_pdf(string $title, array $lines, string $outFile): void {
-    // PDF texte, 1 page, sans dépendance externe
-    $y = 800; $leading = 16;
-    $content = "BT /F1 14 Tf 50 $y Td (".pdf_escape($title).") Tj ET\n";
-    foreach ($lines as $ln) {
-        $y -= $leading;
-        if ($y < 60) break; // simple: on coupe si dépasse
-        $content .= "BT /F1 11 Tf 50 $y Td (".pdf_escape($ln).") Tj ET\n";
-    }
-    $len = strlen($content);
-    $pdf  = "%PDF-1.4\n";
-    $pdf .= "1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n";
-    $pdf .= "2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj\n";
-    $pdf .= "3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources <</Font <</F1 4 0 R>>>> /Contents 5 0 R>> endobj\n";
-    $pdf .= "4 0 obj <</Type /Font /Subtype /Type1 /BaseFont /Helvetica>> endobj\n";
-    $pdf .= "5 0 obj <</Length $len>> stream\n$content\nendstream endobj\n";
-    $xrefPos = strlen($pdf);
-    $pdf .= "xref\n0 6\n";
-    $pdf .= "0000000000 65535 f \n";
-    for ($i=1; $i<=5; $i++) $pdf .= "0000000000 00000 n \n";
-    $pdf .= "trailer <</Size 6 /Root 1 0 R>>\nstartxref\n$xrefPos\n%%EOF";
-    file_put_contents($outFile, $pdf);
-}
-
-/* -------------------- PDF statistiques -------------------- */
-function generate_stats_pdf(PDO $db, int $session_id, string $survey_title, string $outPdf): void {
-    $lines = [];
-    $lines[] = "Sondage : " . ($survey_title ?: "Sans titre");
-    $lines[] = "";
-
-    $stmt = $db->prepare(
-        "SELECT q.id AS qid, q.qtext, q.qtype, q.choices
-         FROM sessions s
-         JOIN questions q ON q.survey_id = s.survey_id
-         WHERE s.id = ?
-         ORDER BY q.id"
-    );
-    $stmt->execute([$session_id]);
-    while ($q = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $lines[] = "Q".$q['qid'].": ".($q['qtext'] ?? '');
-        $qtype   = $q['qtype'] ?? '';
-        $choices = $q['choices'] ? json_decode($q['choices'], true) : [];
-        if (!is_array($choices)) $choices = [];
-
-        if (in_array($qtype, ['quiz','truefalse','opinion'])) {
-            $c = $db->prepare("SELECT answer_indices FROM responses WHERE session_id=? AND question_id=?");
-            $c->execute([$session_id, (int)$q['qid']]);
-            $counts = array_fill(0, max(1, count($choices)), 0);
-            while ($r = $c->fetch(PDO::FETCH_ASSOC)) {
-                $idxs = json_decode($r['answer_indices'], true);
-                if (!is_array($idxs)) $idxs = [];
-                foreach ($idxs as $i) if (isset($counts[$i])) $counts[$i]++;
-            }
-            foreach ($choices as $i=>$label) {
-                $lines[] = "  - ".($label ?? "Choix $i").": ".$counts[$i]." réponse(s)";
-            }
-        } else {
-            // short/long/date/rating/feedback : nombre de réponses
-            $c = $db->prepare("SELECT COUNT(*) FROM responses WHERE session_id=? AND question_id=?");
-            $c->execute([$session_id, (int)$q['qid']]);
-            $total = (int)$c->fetchColumn();
-            $lines[] = "  - Réponses: $total";
-        }
-        $lines[] = "";
-    }
-
-    make_minimal_pdf("Statistiques du sondage (session $session_id)", $lines, $outPdf);
-}
-
-/* -------------------- CSV réponses brutes -------------------- */
-function generate_responses_csv(PDO $db, int $session_id, string $outCsv): void {
-    // IMPORTANT: pas de colonne r.answer_text — tout est dans answer_indices
-    $sql =
-        "SELECT r.user_name, r.question_id, r.answer_indices, r.is_correct, r.created_at,
-                q.qtext, q.qtype, q.choices
-         FROM responses r
-         JOIN questions q ON q.id = r.question_id
-         WHERE r.session_id = ?
-         ORDER BY r.user_name, r.question_id, r.created_at";
-    $st = $db->prepare($sql);
-    $st->execute([$session_id]);
-
-    $fp = fopen($outCsv, 'w');
-    fputcsv($fp, ['Participant','Question','Type','Réponse','Correct','Horodatage']);
-
-    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
-        $qtype   = $row['qtype'];
-        $choices = $row['choices'] ? json_decode($row['choices'], true) : [];
-        if (!is_array($choices)) $choices = [];
-        $raw     = $row['answer_indices'];
-        $answer  = '';
-
-        if (in_array($qtype, ['quiz','truefalse','opinion'])) {
-            $idxs = json_decode($raw, true);
-            if (!is_array($idxs)) $idxs = [];
-            $labels = [];
-            foreach ($idxs as $i) $labels[] = $choices[$i] ?? ('#'.$i);
-            $answer = implode(' | ', $labels);
-        } else {
-            // short/long/date/rating/feedback => texte/valeur brute
-            $answer = (string)$raw;
-        }
-
-        $correct = ($qtype === 'opinion' || $qtype === 'feedback') ? '—' : ((int)$row['is_correct'] === 1 ? '1' : '0');
-
-        fputcsv($fp, [
-            $row['user_name'],
-            $row['qtext'],
-            $qtype,
-            $answer,
-            $correct,
-            $row['created_at'] ?? ''
-        ]);
-    }
-    fclose($fp);
-}
-
-/* ----------------------------- MAIN -------------------------- */
-$base = sys_get_temp_dir();
-$dir  = $base . '/export_' . $session_id . '_' . time();
-if (!is_dir($dir)) mkdir($dir, 0777, true);
-
-// Générer PDF + CSV
-$pdfFile = $dir . '/stats.pdf';
-$csvFile = $dir . '/responses.csv';
-generate_stats_pdf($db, $session_id, (string)($session['survey_title'] ?? ''), $pdfFile);
-generate_responses_csv($db, $session_id, $csvFile);
-
-// ZIP
-if (!class_exists('ZipArchive')) {
-    http_response_code(500);
-    echo "Extension ZipArchive manquante (activez php_zip dans php.ini).";
+// Only allow export if session is ended (is_active=0)
+if ($session['is_active']) {
+    http_response_code(403);
+    echo 'La session est toujours active.';
     exit;
 }
-$zipName = 'export_session_' . $session_id . '.zip';
-$zipPath = $dir . '/' . $zipName;
+// Compute statistics for each question
+$survey_id = $session['survey_id'];
+// Fetch questions
+$stmtQ = $db->prepare('SELECT id, qtext, qtype, choices, correct_indices, explain_media, explain_text FROM questions WHERE survey_id = ? ORDER BY id ASC');
+$stmtQ->execute([$survey_id]);
+$questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
 
+// Pre-fetch counts per question
+// We'll fetch responses once per question to compute counts
+// Compose lines for PDF
+$lines = [];
+$lines[] = 'Statistiques du sondage';
+$lines[] = 'Session PIN: ' . $session['pin'];
+$lines[] = 'Date: ' . date('Y-m-d H:i:s');
+$lines[] = '';
+foreach ($questions as $idx => $q) {
+    $qtext = $q['qtext'] ?: 'Question ' . ($idx + 1);
+    $qtype = $q['qtype'];
+    $lines[] = 'Question ' . ($idx + 1) . ': ' . $qtext;
+    // Note animateur (explain_text) if exists
+    if ($q['explain_text']) {
+        // Add note line truncated to 200 characters
+        $note = trim(strip_tags($q['explain_text']));
+        $note = mb_substr($note, 0, 200);
+        $lines[] = '  Note: ' . $note;
+    }
+    // Compute counts and total
+    $stmtC = $db->prepare('SELECT answer_indices, is_correct FROM responses WHERE session_id=? AND question_id=?');
+    $stmtC->execute([$session_id, $q['id']]);
+    $counts = [];
+    $total = 0;
+    $correctCount = 0;
+    $choices = $q['choices'] ? json_decode($q['choices'], true) : [];
+    foreach ($choices as $choice) {
+        $counts[] = 0;
+    }
+    while ($row = $stmtC->fetch(PDO::FETCH_ASSOC)) {
+        $total++;
+        $indices = $row['answer_indices'] ? json_decode($row['answer_indices'], true) : [];
+        if (is_array($indices)) {
+            foreach ($indices as $i) {
+                if (isset($counts[$i])) $counts[$i]++;
+            }
+        }
+        if ($row['is_correct']) $correctCount++;
+    }
+    if (in_array($qtype, ['quiz','truefalse','opinion'])) {
+        // Show distribution
+        foreach ($choices as $cidx => $choice) {
+            $cnt = $counts[$cidx] ?? 0;
+            $pct = ($total > 0) ? round(($cnt / $total) * 100) : 0;
+            $letter = chr(65 + $cidx);
+            $indicator = '';
+            // For quiz or truefalse, mark correct answer with ✓
+            $correctIndices = $q['correct_indices'] ? json_decode($q['correct_indices'], true) : [];
+            if (in_array($cidx, $correctIndices) && in_array($qtype, ['quiz','truefalse'])) {
+                $indicator = ' ✓';
+            }
+            $lines[] = '  ' . $letter . '. ' . $choice . $indicator . ' - ' . $cnt . '/' . $total . ' (' . $pct . '%)';
+        }
+        if ($qtype === 'opinion') {
+            // No correct answer summarization; also show total correct? no
+        }
+    } elseif ($qtype === 'feedback') {
+        // Show total responses
+        $lines[] = '  Réponses: ' . $total;
+    } elseif ($qtype === 'short' || $qtype === 'long' || $qtype === 'date') {
+        // Count of responses for open questions
+        $lines[] = '  Réponses: ' . $total;
+    } elseif ($qtype === 'rating') {
+        // Compute average rating
+        $stmtAvg = $db->prepare('SELECT AVG(answer_rating) FROM responses WHERE session_id=? AND question_id=?');
+        $stmtAvg->execute([$session_id, $q['id']]);
+        $avg = $stmtAvg->fetchColumn();
+        $lines[] = '  Note moyenne: ' . ($avg !== null ? round($avg, 2) : 'N/A');
+    }
+    $lines[] = '';
+}
+// Paths for export files
+$exportDir = __DIR__ . '/../exports';
+if (!is_dir($exportDir)) {
+    mkdir($exportDir, 0775, true);
+}
+$timestamp = date('Ymd_His');
+$baseName = 'session_' . $session_id . '_' . $timestamp;
+$pdfPath = $exportDir . '/' . $baseName . '_stats.pdf';
+$csvPath = $exportDir . '/' . $baseName . '_responses.csv';
+$zipPath = $exportDir . '/' . $baseName . '.zip';
+// Generate files
+generate_stats_pdf($lines, $pdfPath);
+generate_responses_csv($session_id, $db, $csvPath);
+// Create zip
 $zip = new ZipArchive();
-$zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-$zip->addFile($pdfFile, 'stats.pdf');
-$zip->addFile($csvFile, 'responses.csv');
-$zip->close();
-
-// Historique des exports dans /exports
-$persistDir = realpath(__DIR__ . '/..') . '/exports';
-if (!is_dir($persistDir)) @mkdir($persistDir, 0777, true);
-$persistName = 'export_session_' . $session_id . '_' . date('Ymd_His') . '.zip';
-@copy($zipPath, $persistDir . '/' . $persistName);
-
-// Stream vers le navigateur
+if ($zip->open($zipPath, ZipArchive::CREATE) === true) {
+    $zip->addFile($pdfPath, basename($pdfPath));
+    $zip->addFile($csvPath, basename($csvPath));
+    $zip->close();
+}
+// Serve the zip file for download
 header('Content-Type: application/zip');
-header('Content-Disposition: attachment; filename="'.$zipName.'"');
+header('Content-Disposition: attachment; filename="' . basename($zipPath) . '"');
 header('Content-Length: ' . filesize($zipPath));
 readfile($zipPath);
-
-// Nettoyage tmp
-@unlink($pdfFile);
-@unlink($csvFile);
-@unlink($zipPath);
-@rmdir($dir);
+exit;
