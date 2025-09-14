@@ -100,6 +100,8 @@ $active_session = $stmt->fetch(PDO::FETCH_ASSOC);
             <div class="d-flex flex-wrap">
                 <a href="host_session.php?session_id=<?= $active_session['id'] ?>" class="btn btn-success me-2 mb-2">Contrôler la session</a>
                 <form method="post" action="api/end_session.php">
+                    <input type="hidden" name="session_id" value="<?= (int)$active_session['id'] ?>">
+                    <?php if (function_exists('csrf_token')) echo csrf_token(); ?>
                     <button type="submit" class="btn btn-danger">Terminer</button>
                 </form>
 
