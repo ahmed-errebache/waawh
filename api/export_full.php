@@ -11,23 +11,56 @@ function pdf_escape($text) {
     return str_replace(["\\", "(", ")"], ["\\\\", "\\(", "\\)"], $text);
 }
 
-// Generate a simple PDF file with statistics lines
-function generate_stats_pdf($lines, $outPath) {
-    // Build PDF objects manually. This minimal implementation writes a single-page PDF
+// Generate a simple chart as ASCII art for PDF
+function generate_ascii_chart($choices, $counts, $total) {
+    $chart = [];
+    $maxCount = max($counts) ?: 1; // Prevent division by zero
+    $barWidth = 30; // Maximum bar width in characters
+    
+    foreach ($choices as $idx => $choice) {
+        $count = $counts[$idx] ?? 0;
+        $percentage = $total > 0 ? round(($count / $total) * 100) : 0;
+        $barLength = $maxCount > 0 ? round(($count / $maxCount) * $barWidth) : 0;
+        $bar = str_repeat('■', $barLength);
+        $letter = chr(65 + $idx);
+        $chart[] = sprintf("  %s. %s", $letter, substr($choice, 0, 40));
+        $chart[] = sprintf("     %s %d (%d%%)", $bar, $count, $percentage);
+    }
+    return $chart;
+}
+
+// Generate enhanced PDF file with statistics and charts
+function generate_stats_pdf($lines, $chartData, $outPath) {
+    // Build PDF objects manually. This enhanced implementation includes ASCII charts
     // using the built-in Helvetica font. Each line will be rendered on its own line.
     $content = "";
     // Start text object
     $content .= "BT\n";
     // Use Helvetica 12pt
     $content .= "/F1 12 Tf\n";
-    // Move to starting position (50, 780)
-    $content .= "50 780 Td\n";
-    foreach ($lines as $i => $line) {
-        $escaped = pdf_escape($line);
-        // Output text for this line
-        $content .= "(" . $escaped . ") Tj\n";
-        // Move down by 15 points for next line
-        $content .= "0 -15 Td\n";
+    // Move to starting position (50, 750)
+    $content .= "50 750 Td\n";
+    $lineHeight = 15;
+    
+    foreach ($lines as $line) {
+        if (strpos($line, 'CHART:') === 0) {
+            // Handle chart insertion
+            $questionId = intval(substr($line, 6));
+            if (isset($chartData[$questionId])) {
+                $chart = $chartData[$questionId];
+                foreach ($chart as $chartLine) {
+                    $escaped = pdf_escape($chartLine);
+                    $content .= "(" . $escaped . ") Tj\n";
+                    $content .= "0 -" . $lineHeight . " Td\n";
+                }
+            }
+        } else {
+            $escaped = pdf_escape($line);
+            // Output text for this line
+            $content .= "(" . $escaped . ") Tj\n";
+            // Move down by 15 points for next line
+            $content .= "0 -" . $lineHeight . " Td\n";
+        }
     }
     $content .= "ET\n";
     $length = strlen($content);
@@ -162,7 +195,8 @@ $questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
 // We'll fetch responses once per question to compute counts
 // Compose lines for PDF
 $lines = [];
-$lines[] = 'Statistiques du sondage';
+$chartData = [];
+$lines[] = 'Statistiques du sondage avec graphiques';
 $lines[] = 'Session PIN: ' . $session['pin'];
 $lines[] = 'Date: ' . date('Y-m-d H:i:s');
 $lines[] = '';
@@ -197,8 +231,13 @@ foreach ($questions as $idx => $q) {
         }
         if ($row['is_correct']) $correctCount++;
     }
-    if (in_array($qtype, ['quiz','truefalse','opinion'])) {
-        // Show distribution
+    if (in_array($qtype, ['quiz','truefalse','opinion']) && !empty($choices)) {
+        // Generate ASCII chart
+        $chart = generate_ascii_chart($choices, $counts, $total);
+        $chartData[$q['id']] = $chart;
+        $lines[] = 'CHART:' . $q['id'];
+        
+        // Show distribution with text stats
         foreach ($choices as $cidx => $choice) {
             $cnt = $counts[$cidx] ?? 0;
             $pct = ($total > 0) ? round(($cnt / $total) * 100) : 0;
@@ -210,9 +249,6 @@ foreach ($questions as $idx => $q) {
                 $indicator = ' ✓';
             }
             $lines[] = '  ' . $letter . '. ' . $choice . $indicator . ' - ' . $cnt . '/' . $total . ' (' . $pct . '%)';
-        }
-        if ($qtype === 'opinion') {
-            // No correct answer summarization; also show total correct? no
         }
     } elseif ($qtype === 'feedback') {
         // Show total responses
@@ -255,7 +291,7 @@ $pdfPath = $exportDir . '/' . $baseName . '_stats.pdf';
 $csvPath = $exportDir . '/' . $baseName . '_responses.csv';
 $zipPath = $exportDir . '/' . $baseName . '.zip';
 // Generate files
-generate_stats_pdf($lines, $pdfPath);
+generate_stats_pdf($lines, $chartData, $pdfPath);
 generate_responses_csv($session_id, $db, $csvPath);
 // Create zip
 $zip = new ZipArchive();
