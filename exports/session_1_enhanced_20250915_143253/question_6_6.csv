@@ -1,0 +1,5 @@
+participant_name,answer,is_correct,created_at
+Hamza,"Difficulté à aller à l’école",Non,"2025-08-27 13:19:25"
+TestUser1,"Difficulté à se procurer des vêtements",Non,"2025-09-15 14:24:04"
+TestUser2,"Difficulté à se procurer des protections hygiéniques à cause des faibles revenus",Oui,"2025-09-15 14:24:04"
+TestUser3,,Non,"2025-09-15 14:24:04"

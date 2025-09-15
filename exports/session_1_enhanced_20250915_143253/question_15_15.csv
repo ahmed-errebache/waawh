@@ -1,0 +1,4 @@
+participant_name,answer,is_correct,created_at
+TestUser1,"Symptômes de fatigue, pâleur ou essoufflement",Non,"2025-09-15 14:24:04"
+TestUser2,"Symptômes de fatigue, pâleur ou essoufflement",Non,"2025-09-15 14:24:04"
+TestUser3,"Douleurs intenses qui perturbent la vie quotidienne",Non,"2025-09-15 14:24:04"

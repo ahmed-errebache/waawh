@@ -1,0 +1,4 @@
+participant_name,answer,is_correct,created_at
+TestUser1,"Un moment où les règles sont plus abondantes",Non,"2025-09-15 14:24:04"
+TestUser2,"Une envie irrésistible de sucreries",Oui,"2025-09-15 14:24:04"
+TestUser3,"Un moment où les règles sont plus abondantes",Non,"2025-09-15 14:24:04"

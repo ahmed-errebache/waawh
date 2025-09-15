@@ -1,7 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/config.php';
-require_login('host');
+require_login(); // Allow both admin and host access
 $user = current_user();
 
 // Get session_id from query
@@ -12,8 +12,8 @@ if (!$session_id) {
 }
 
 $db = connect_db();
-$stmt = $db->prepare('SELECT s.*, su.title FROM sessions s JOIN surveys su ON s.survey_id = su.id WHERE s.id = ? AND s.host_id = ?');
-$stmt->execute([$session_id, $user['id']]);
+$stmt = $db->prepare('SELECT s.*, su.title FROM sessions s JOIN surveys su ON s.survey_id = su.id WHERE s.id = ? AND (s.host_id = ? OR ? = "admin")');
+$stmt->execute([$session_id, $user['id'], $user['role']]);
 $session = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$session) {
     echo 'Session introuvable ou non autorisée.';
