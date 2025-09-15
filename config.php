@@ -30,11 +30,7 @@ define('SQLITE_FILE', __DIR__ . '/data/database.sqlite');
 $directories = [__DIR__ . '/data', __DIR__ . '/uploads'];
 foreach ($directories as $dir) {
     if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
-    }
-    // Ensure directory is writable
-    if (!is_writable($dir)) {
-        chmod($dir, 0755);
+        mkdir($dir, 0777, true);
     }
 }
 
@@ -65,42 +61,18 @@ function connect_db(): PDO
     if ($pdo) {
         return $pdo;
     }
-    
-    try {
-        if (USE_SQLITE) {
-            $dsn = 'sqlite:' . SQLITE_FILE;
-            
-            // Ensure SQLite file directory exists and is writable
-            $dir = dirname(SQLITE_FILE);
-            if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
-            }
-            if (!is_writable($dir)) {
-                chmod($dir, 0755);
-            }
-            
-            $pdo = new PDO($dsn);
-            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            // Enable foreign keys for SQLite
-            $pdo->exec('PRAGMA foreign_keys = ON');
-            // Optimize SQLite for shared hosting
-            $pdo->exec('PRAGMA synchronous = NORMAL');
-            $pdo->exec('PRAGMA cache_size = 10000');
-            $pdo->exec('PRAGMA temp_store = MEMORY');
-        } else {
-            $dsn = MYSQL_DSN;
-            $pdo = new PDO($dsn, MYSQL_USER, MYSQL_PASS, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            ]);
-        }
-    } catch (PDOException $e) {
-        // Better error handling for deployment debugging
-        error_log("Database connection error: " . $e->getMessage());
-        die("Database connection failed. Please check your configuration. Error: " . $e->getMessage());
+    if (USE_SQLITE) {
+        $dsn = 'sqlite:' . SQLITE_FILE;
+        $pdo = new PDO($dsn);
+        // Enable foreign keys for SQLite
+        $pdo->exec('PRAGMA foreign_keys = ON');
+    } else {
+        $dsn = MYSQL_DSN;
+        $pdo = new PDO($dsn, MYSQL_USER, MYSQL_PASS, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
     }
-    
     return $pdo;
 }
 
@@ -109,47 +81,43 @@ function connect_db(): PDO
 // running migrations manually instead of automatically.
 function ensure_schema()
 {
-    try {
-        $db = connect_db();
-        
-        // Users: administrators and hosts/animators.
-        // Initial table definition. Additional columns such as email and is_active
-        // are added conditionally below to avoid breaking existing installations.
-        $db->exec('CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN (\'admin\', \'host\')),
-            company_name TEXT,
-            logo TEXT,
-            primary_color TEXT,
-            accent_color TEXT,
-            background_color TEXT,
-            background_image TEXT,
-            email TEXT,
-            is_active INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )');
+    $db = connect_db();
+    // Users: administrators and hosts/animators.
+    // Initial table definition. Additional columns such as email and is_active
+    // are added conditionally below to avoid breaking existing installations.
+    $db->exec('CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN (\'admin\', \'host\')),
+        company_name TEXT,
+        logo TEXT,
+        primary_color TEXT,
+        accent_color TEXT,
+        background_color TEXT,
+        background_image TEXT,
+        email TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )');
 
-        // SQLite does not support ALTER TABLE IF NOT EXISTS, so we check for missing
-        // columns manually and add them as needed. This allows older databases to
-        // upgrade gracefully when new fields are introduced.
-        if (USE_SQLITE) {
-            $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
-            $colNames = array_column($cols, 'name');
-            // Ensure the background_image column exists
-            if (!in_array('background_image', $colNames)) {
-                $db->exec('ALTER TABLE users ADD COLUMN background_image TEXT');
-            }
-            // Add email column if it does not exist
-            if (!in_array('email', $colNames)) {
-                $db->exec('ALTER TABLE users ADD COLUMN email TEXT');
-            }
-            // Add is_active column if it does not exist. Use INTEGER type with default 1
-            if (!in_array('is_active', $colNames)) {
-                $db->exec('ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1');
-            }
-        }
+    // SQLite does not support ALTER TABLE IF NOT EXISTS, so we check for missing
+    // columns manually and add them as needed. This allows older databases to
+    // upgrade gracefully when new fields are introduced.
+    $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
+    $colNames = array_column($cols, 'name');
+    // Ensure the background_image column exists
+    if (!in_array('background_image', $colNames)) {
+        $db->exec('ALTER TABLE users ADD COLUMN background_image TEXT');
+    }
+    // Add email column if it does not exist
+    if (!in_array('email', $colNames)) {
+        $db->exec('ALTER TABLE users ADD COLUMN email TEXT');
+    }
+    // Add is_active column if it does not exist. Use INTEGER type with default 1
+    if (!in_array('is_active', $colNames)) {
+        $db->exec('ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1');
+    }
     // Surveys table with owner_id referring to a host user (NULL if created by admin only).
     $db->exec('CREATE TABLE IF NOT EXISTS surveys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -618,23 +586,11 @@ function ensure_schema()
                 ]);
         }
     }
-    } catch (PDOException $e) {
-        error_log("Database schema error: " . $e->getMessage());
-        die("Database schema initialization failed. Please check file permissions and database configuration. Error: " . $e->getMessage());
-    } catch (Exception $e) {
-        error_log("Schema initialization error: " . $e->getMessage());
-        die("Application initialization failed. Error: " . $e->getMessage());
-    }
 }
 
 // Initialize the database schema on every request. This ensures the app works
 // out of the box even on a fresh installation.
-try {
-    ensure_schema();
-} catch (Exception $e) {
-    error_log("Failed to initialize application: " . $e->getMessage());
-    die("Application initialization failed. Please check your hosting configuration and file permissions.");
-}
+ensure_schema();
 
 function csrf_token(): string
 {

@@ -69,11 +69,6 @@ $total_questions = (int)$stmt->fetchColumn();
                     <button type="submit" class="btn btn-primary" style="background-color:<?= esc($user['accent_color'] ?: '#2EC4B6') ?>;border-color:<?= esc($user['accent_color'] ?: '#2EC4B6') ?>;">Démarrer</button>
                 </form>
             <?php endif; ?>
-            <form method="post" action="api/previous_question.php" class="me-2 mb-2">
-                <?= csrf_token() ?>
-                <input type="hidden" name="session_id" value="<?= $session['id'] ?>">
-                <button type="submit" class="btn btn-secondary" <?= $session['current_question_index'] == 0 ? 'disabled' : '' ?>>Question précédente</button>
-            </form>
             <form method="post" action="api/reveal_question.php" class="me-2 mb-2">
                 <?= csrf_token() ?>
                 <input type="hidden" name="session_id" value="<?= $session['id'] ?>">
@@ -102,10 +97,8 @@ $total_questions = (int)$stmt->fetchColumn();
                 <!-- Export individual formats as before -->
                 <a href="api/export_results.php?session_id=<?= $session['id'] ?>&format=csv" class="btn btn-outline-primary me-2">Exporter CSV</a>
                 <a href="api/export_results.php?session_id=<?= $session['id'] ?>&format=xls" class="btn btn-outline-secondary me-2">Exporter XLS</a>
-                <!-- Original full export: zipped PDF + CSV -->
-                <a href="api/export_full.php?session_id=<?= $session['id'] ?>" class="btn btn-outline-success me-2">Exporter dossier complet (PDF + CSV)</a>
-                <!-- Enhanced export with charts and individual files -->
-                <a href="api/export_enhanced.php?session_id=<?= $session['id'] ?>" class="btn btn-outline-warning">Export avancé (Graphiques + Fichiers individuels)</a>
+                <!-- New full export: zipped PDF + CSV -->
+                <a href="api/export_full.php?session_id=<?= $session['id'] ?>" class="btn btn-outline-success">Exporter dossier complet (PDF + CSV)</a>
             </div>
             <?php
             // Afficher l'historique des exports pour cette session
