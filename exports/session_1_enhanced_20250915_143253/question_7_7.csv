@@ -1,0 +1,5 @@
+participant_name,answer,is_correct,created_at
+Hamza,Vrai,Oui,"2025-08-27 13:19:42"
+TestUser1,Faux,Non,"2025-09-15 14:24:04"
+TestUser2,Vrai,Oui,"2025-09-15 14:24:04"
+TestUser3,,Non,"2025-09-15 14:24:04"

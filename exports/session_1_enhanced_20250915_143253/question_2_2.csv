@@ -1,0 +1,4 @@
+participant_name,answer,is_correct,created_at
+TestUser1,0,Oui,"2025-09-15 14:24:04"
+TestUser2,0,Oui,"2025-09-15 14:24:04"
+TestUser3,2,Non,"2025-09-15 14:24:04"

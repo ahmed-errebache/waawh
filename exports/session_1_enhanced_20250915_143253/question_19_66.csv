@@ -1,0 +1,4 @@
+participant_name,answer,is_correct,created_at
+TestUser1,"Option C - Moyen",Non,"2025-09-15 14:24:04"
+TestUser2,"Option D - Pas bien",Non,"2025-09-15 14:24:04"
+TestUser3,"Option A - Très bien",Oui,"2025-09-15 14:24:04"
